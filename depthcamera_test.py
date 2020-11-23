@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import glob
 import os
 import sys
@@ -12,8 +10,6 @@ except IndexError:
     pass
 import carla
 
-from carla import ColorConverter as cc
-
 import random
 import time
 import numpy as np
@@ -23,33 +19,45 @@ import pygame
 from pygame.locals import K_ESCAPE
 from threading import Lock
 
-from lanedetector import laneDetect
-from labor_img import process_img
-from Fuzzy import createContorller
 
 IM_WIDTH = 640
 IM_HEIGHT = 480
 seq = 0
 mutex = Lock()
 
-def frame_process(image):
-    process_img(image)
+def process_img(image):
+    if not mutex.acquire(False):
+        return 0
     
+    #image.convert(carla.ColorConverter.Depth)
+    image.convert(carla.ColorConverter.LogarithmicDepth)
+    #image.convert(carla.ColorConverter.CityScapesPalette)
     
+    global seq
+    array = np.frombuffer(image.raw_data, dtype=np.dtype("uint8"))
+    array = np.reshape(array, (image.height, image.width, 4))
+    array = array[:, :, :3]
+    array = array[:, :, ::-1]
+    surface = pygame.surfarray.make_surface(array.swapaxes(0, 1))
+    display_surface.blit(surface, (0, 0))    
+    #pygame.display.flip()
+    #pygame.display.update()
+     
+    print(seq)
+    seq = seq + 1
+    # world.tick()  # In case of synchronous simulation
+    mutex.release()
     
     return 0
 
-
 def ontick(ws):
-    ##print(ws.frame)
-    return
-
+    print(ws.frame)
+    
 actor_list = []
 try:
     client = carla.Client('localhost', 2000)
     client.set_timeout(5.0)
-    #client.load_world('Town04')
-    
+
     world = client.get_world()
     
     # Set synchronous mode
@@ -65,20 +73,20 @@ try:
 
     # Select Tesla model 3 from library
     bp = blueprint_library.filter('model3')[0]
-    ##print(bp)
+    print(bp)
 
     # Select spawning point
-    spawn_point = world.get_map().get_spawn_points()[3]
+    spawn_point = world.get_map().get_spawn_points()[0]
 
     vehicle = world.spawn_actor(bp, spawn_point)
-    vehicle.apply_control(carla.VehicleControl(throttle=0.3, steer=0.0))
-    vehicle.set_autopilot(False)  # if you just wanted some NPCs to drive.
+    #vehicle.apply_control(carla.VehicleControl(throttle=1.0, steer=0.0))
+    #vehicle.set_autopilot(True)  # if you just wanted some NPCs to drive.
 
     actor_list.append(vehicle)
 
     # https://carla.readthedocs.io/en/latest/cameras_and_sensors
     # get the blueprint for this sensor
-    blueprint = blueprint_library.find('sensor.camera.rgb')
+    blueprint = blueprint_library.find('sensor.camera.depth')
     # change the dimensions of the image
     blueprint.set_attribute('image_size_x', f'{IM_WIDTH}')
     blueprint.set_attribute('image_size_y', f'{IM_HEIGHT}')
@@ -96,11 +104,11 @@ try:
 
     # Init display
     pygame.init() 
-    display_surface = pygame.display.set_mode((1280, 960), pygame.HWSURFACE | pygame.DOUBLEBUF)
+    display_surface = pygame.display.set_mode((640, 480), pygame.HWSURFACE | pygame.DOUBLEBUF)
     pygame.display.set_caption('CARLA image') 
-    
+
     # do something with this sensor
-    sensor.listen(lambda data: frame_process(data))
+    sensor.listen(lambda data: process_img(data))
     
     # world.tick() # in case of synchronous simulation
 
@@ -112,7 +120,6 @@ try:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
-            # This thing does not work here...
             elif event.type == pygame.KEYDOWN:
                 if event.key == K_ESCAPE:
                     print("Game Over")
